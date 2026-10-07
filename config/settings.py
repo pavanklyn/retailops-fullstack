@@ -97,4 +97,15 @@ SPECTACULAR_SETTINGS = {
     "DESCRIPTION": "Inventory and order management REST API",
     "VERSION": "1.0.0",
     "SERVE_INCLUDE_SCHEMA": False,
+    "SERVERS": [
+        {
+            "url": "https://retailops-fullstack.onrender.com",
+            "description": "Production",
+        },
+        {
+            "url": "http://127.0.0.1:8000",
+            "description": "Local Development",
+        },
+    ],
 }
+
