@@ -28,38 +28,94 @@ function App() {
   const [customersCount, setCustomersCount] = useState(0);
   const [ordersCount, setOrdersCount] = useState(0);
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [inventoryLoading, setInventoryLoading] = useState(false);
 
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  const [isAuthenticated, setIsAuthenticated] = useState(
+    Boolean(localStorage.getItem("access_token"))
+  );
+
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [loggingIn, setLoggingIn] = useState(false);
+
   useEffect(() => {
-    loadDashboard();
-  }, []);
+    if (isAuthenticated) {
+      loadDashboard();
+    }
+  }, [isAuthenticated]);
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+
+    setLoginError("");
+    setLoggingIn(true);
+
+    try {
+      await login(username.trim(), password);
+
+      setIsAuthenticated(true);
+      setUsername("");
+      setPassword("");
+    } catch (err) {
+      console.error(err);
+
+      setLoginError(
+        err.response?.data?.detail ||
+          "Invalid username or password."
+      );
+    } finally {
+      setLoggingIn(false);
+    }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+
+    setIsAuthenticated(false);
+    setProducts([]);
+    setInventory([]);
+    setCustomersCount(0);
+    setOrdersCount(0);
+    setPage("dashboard");
+    setError("");
+    setMessage("");
+  };
 
   const loadDashboard = async () => {
     try {
       setLoading(true);
       setError("");
 
-      await login();
-
-      const [productsResponse, customersResponse, ordersResponse] =
-        await Promise.all([
-          api.get("/products/"),
-          api.get("/customers/"),
-          api.get("/orders/"),
-        ]);
+      const [
+        productsResponse,
+        customersResponse,
+        ordersResponse,
+      ] = await Promise.all([
+        api.get("/products/"),
+        api.get("/customers/"),
+        api.get("/orders/"),
+      ]);
 
       const productData =
-        productsResponse.data.results || productsResponse.data || [];
+        productsResponse.data.results ||
+        productsResponse.data ||
+        [];
 
       const customerData =
-        customersResponse.data.results || customersResponse.data || [];
+        customersResponse.data.results ||
+        customersResponse.data ||
+        [];
 
       const orderData =
-        ordersResponse.data.results || ordersResponse.data || [];
+        ordersResponse.data.results ||
+        ordersResponse.data ||
+        [];
 
       setProducts(productData);
 
@@ -67,12 +123,22 @@ function App() {
         customersResponse.data.count ?? customerData.length
       );
 
-      setOrdersCount(ordersResponse.data.count ?? orderData.length);
+      setOrdersCount(
+        ordersResponse.data.count ?? orderData.length
+      );
 
       await loadInventory();
     } catch (err) {
       console.error(err);
-      setError("Unable to load dashboard data.");
+
+      if (err.response?.status === 401) {
+        handleLogout();
+        setLoginError(
+          "Your session has expired. Please sign in again."
+        );
+      } else {
+        setError("Unable to load dashboard data.");
+      }
     } finally {
       setLoading(false);
     }
@@ -84,10 +150,19 @@ function App() {
 
       const response = await api.get("/inventory/");
 
-      setInventory(response.data.results || response.data || []);
+      setInventory(
+        response.data.results ||
+          response.data ||
+          []
+      );
     } catch (err) {
       console.error(err);
-      setError("Unable to load inventory.");
+
+      if (err.response?.status === 401) {
+        handleLogout();
+      } else {
+        setError("Unable to load inventory.");
+      }
     } finally {
       setInventoryLoading(false);
     }
@@ -101,17 +176,39 @@ function App() {
     }, 3000);
   };
 
+  if (!isAuthenticated) {
+    return (
+      <LoginScreen
+        username={username}
+        password={password}
+        loginError={loginError}
+        loggingIn={loggingIn}
+        setUsername={setUsername}
+        setPassword={setPassword}
+        onSubmit={handleLogin}
+      />
+    );
+  }
+
   return (
     <div style={styles.app}>
-      <Sidebar page={page} setPage={setPage} />
+      <Sidebar
+        page={page}
+        setPage={setPage}
+        onLogout={handleLogout}
+      />
 
       <main style={styles.main}>
         {message && (
-          <div style={styles.successMessage}>✓ {message}</div>
+          <div style={styles.successMessage}>
+            ✓ {message}
+          </div>
         )}
 
         {error && (
-          <div style={styles.errorMessage}>⚠ {error}</div>
+          <div style={styles.errorMessage}>
+            ⚠ {error}
+          </div>
         )}
 
         {page === "dashboard" && (
@@ -142,9 +239,13 @@ function App() {
           />
         )}
 
-        {["orders", "customers", "suppliers", "shipments", "settings"].includes(
-          page
-        ) && (
+        {[
+          "orders",
+          "customers",
+          "suppliers",
+          "shipments",
+          "settings",
+        ].includes(page) && (
           <ComingSoon
             title={capitalize(page)}
             onBack={() => setPage("dashboard")}
@@ -156,27 +257,165 @@ function App() {
 }
 
 /* =========================================================
+   LOGIN
+========================================================= */
+
+function LoginScreen({
+  username,
+  password,
+  loginError,
+  loggingIn,
+  setUsername,
+  setPassword,
+  onSubmit,
+}) {
+  return (
+    <div style={styles.loginPage}>
+      <div style={styles.loginCard}>
+        <div style={styles.loginBrand}>
+          <div style={styles.loginLogo}>R</div>
+
+          <div>
+            <div style={styles.loginBrandName}>
+              RetailOps
+            </div>
+
+            <div style={styles.loginBrandSub}>
+              Operations Platform
+            </div>
+          </div>
+        </div>
+
+        <div style={styles.loginHeading}>
+          <h1 style={styles.loginTitle}>
+            Welcome back
+          </h1>
+
+          <p style={styles.loginDescription}>
+            Sign in to manage your retail operations.
+          </p>
+        </div>
+
+        {loginError && (
+          <div style={styles.loginError}>
+            ⚠ {loginError}
+          </div>
+        )}
+
+        <form onSubmit={onSubmit}>
+          <div style={styles.loginField}>
+            <label style={styles.loginLabel}>
+              Email
+            </label>
+
+            <input
+              type="email"
+              value={username}
+              onChange={(event) =>
+                setUsername(event.target.value)
+              }
+              placeholder="admin@example.com"
+              autoComplete="username"
+              required
+              style={styles.loginInput}
+            />
+          </div>
+
+          <div style={styles.loginField}>
+            <label style={styles.loginLabel}>
+              Password
+            </label>
+
+            <input
+              type="password"
+              value={password}
+              onChange={(event) =>
+                setPassword(event.target.value)
+              }
+              placeholder="Enter your password"
+              autoComplete="current-password"
+              required
+              style={styles.loginInput}
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loggingIn}
+            style={styles.loginButton}
+          >
+            {loggingIn
+              ? "Signing in..."
+              : "Sign In"}
+          </button>
+        </form>
+
+        <div style={styles.loginFooter}>
+          JWT-secured RetailOps API
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* =========================================================
    SIDEBAR
 ========================================================= */
 
-function Sidebar({ page, setPage }) {
+function Sidebar({
+  page,
+  setPage,
+  onLogout,
+}) {
   const menu = [
     {
       section: "MAIN MENU",
       items: [
-        { id: "dashboard", label: "Dashboard", icon: "▦" },
-        { id: "products", label: "Products", icon: "▣" },
-        { id: "orders", label: "Orders", icon: "▤" },
-        { id: "customers", label: "Customers", icon: "♙" },
-        { id: "inventory", label: "Inventory", icon: "◈" },
-        { id: "suppliers", label: "Suppliers", icon: "◆" },
-        { id: "shipments", label: "Shipments", icon: "➜" },
+        {
+          id: "dashboard",
+          label: "Dashboard",
+          icon: "▦",
+        },
+        {
+          id: "products",
+          label: "Products",
+          icon: "▣",
+        },
+        {
+          id: "orders",
+          label: "Orders",
+          icon: "▤",
+        },
+        {
+          id: "customers",
+          label: "Customers",
+          icon: "♙",
+        },
+        {
+          id: "inventory",
+          label: "Inventory",
+          icon: "◈",
+        },
+        {
+          id: "suppliers",
+          label: "Suppliers",
+          icon: "◆",
+        },
+        {
+          id: "shipments",
+          label: "Shipments",
+          icon: "➜",
+        },
       ],
     },
     {
       section: "SYSTEM",
       items: [
-        { id: "settings", label: "Settings", icon: "⚙" },
+        {
+          id: "settings",
+          label: "Settings",
+          icon: "⚙",
+        },
       ],
     },
   ];
@@ -187,15 +426,25 @@ function Sidebar({ page, setPage }) {
         <div style={styles.logo}>R</div>
 
         <div>
-          <div style={styles.brandName}>RetailOps</div>
-          <div style={styles.brandSub}>Operations Platform</div>
+          <div style={styles.brandName}>
+            RetailOps
+          </div>
+
+          <div style={styles.brandSub}>
+            Operations Platform
+          </div>
         </div>
       </div>
 
       <div style={styles.sidebarContent}>
         {menu.map((group) => (
-          <div key={group.section} style={styles.menuGroup}>
-            <div style={styles.menuTitle}>{group.section}</div>
+          <div
+            key={group.section}
+            style={styles.menuGroup}
+          >
+            <div style={styles.menuTitle}>
+              {group.section}
+            </div>
 
             {group.items.map((item) => (
               <button
@@ -203,10 +452,15 @@ function Sidebar({ page, setPage }) {
                 onClick={() => setPage(item.id)}
                 style={{
                   ...styles.menuItem,
-                  ...(page === item.id ? styles.menuItemActive : {}),
+                  ...(page === item.id
+                    ? styles.menuItemActive
+                    : {}),
                 }}
               >
-                <span style={styles.menuIcon}>{item.icon}</span>
+                <span style={styles.menuIcon}>
+                  {item.icon}
+                </span>
+
                 <span>{item.label}</span>
               </button>
             ))}
@@ -217,10 +471,23 @@ function Sidebar({ page, setPage }) {
       <div style={styles.sidebarFooter}>
         <div style={styles.onlineDot} />
 
-        <div>
-          <div style={styles.footerTitle}>System Online</div>
-          <div style={styles.footerSub}>API Connected</div>
+        <div style={{ flex: 1 }}>
+          <div style={styles.footerTitle}>
+            System Online
+          </div>
+
+          <div style={styles.footerSub}>
+            API Connected
+          </div>
         </div>
+
+        <button
+          onClick={onLogout}
+          style={styles.logoutButton}
+          title="Logout"
+        >
+          ⇥
+        </button>
       </div>
     </aside>
   );
@@ -245,11 +512,15 @@ function Dashboard({
   ).length;
 
   const totalStock = inventory.reduce(
-    (sum, item) => sum + Number(item.available_stock ?? 0),
+    (sum, item) =>
+      sum + Number(item.available_stock ?? 0),
     0
   );
 
-  const healthyStock = Math.max(inventory.length - lowStock, 0);
+  const healthyStock = Math.max(
+    inventory.length - lowStock,
+    0
+  );
 
   return (
     <div>
@@ -258,7 +529,10 @@ function Dashboard({
         title="Retail Operations Dashboard"
         description="Monitor products, inventory and business operations."
         action={
-          <button onClick={onRefresh} style={styles.primaryButton}>
+          <button
+            onClick={onRefresh}
+            style={styles.primaryButton}
+          >
             ↻ Refresh
           </button>
         }
@@ -302,7 +576,10 @@ function Dashboard({
             <div style={styles.panel}>
               <div style={styles.panelHeader}>
                 <div>
-                  <h2 style={styles.panelTitle}>Inventory Health</h2>
+                  <h2 style={styles.panelTitle}>
+                    Inventory Health
+                  </h2>
+
                   <p style={styles.panelSub}>
                     Current stock availability
                   </p>
@@ -314,6 +591,7 @@ function Dashboard({
                   <div style={styles.healthNumber}>
                     {inventory.length}
                   </div>
+
                   <div style={styles.healthLabel}>
                     Inventory Records
                   </div>
@@ -323,13 +601,18 @@ function Dashboard({
                   <div
                     style={{
                       ...styles.healthNumber,
-                      color: lowStock > 0 ? "#dc2626" : "#16a34a",
+                      color:
+                        lowStock > 0
+                          ? "#dc2626"
+                          : "#16a34a",
                     }}
                   >
                     {lowStock}
                   </div>
 
-                  <div style={styles.healthLabel}>Low Stock</div>
+                  <div style={styles.healthLabel}>
+                    Low Stock
+                  </div>
                 </div>
 
                 <div style={styles.healthBox}>
@@ -342,7 +625,9 @@ function Dashboard({
                     {healthyStock}
                   </div>
 
-                  <div style={styles.healthLabel}>Healthy</div>
+                  <div style={styles.healthLabel}>
+                    Healthy
+                  </div>
                 </div>
               </div>
             </div>
@@ -350,7 +635,10 @@ function Dashboard({
             <div style={styles.panel}>
               <div style={styles.panelHeader}>
                 <div>
-                  <h2 style={styles.panelTitle}>Platform Status</h2>
+                  <h2 style={styles.panelTitle}>
+                    Platform Status
+                  </h2>
+
                   <p style={styles.panelSub}>
                     RetailOps service health
                   </p>
@@ -358,10 +646,25 @@ function Dashboard({
               </div>
 
               <div style={styles.statusList}>
-                <StatusRow label="Frontend" status="Operational" />
-                <StatusRow label="Django API" status="Connected" />
-                <StatusRow label="PostgreSQL" status="Connected" />
-                <StatusRow label="Inventory API" status="Live" />
+                <StatusRow
+                  label="Frontend"
+                  status="Operational"
+                />
+
+                <StatusRow
+                  label="Django API"
+                  status="Connected"
+                />
+
+                <StatusRow
+                  label="Database"
+                  status="Configured"
+                />
+
+                <StatusRow
+                  label="Inventory API"
+                  status="Live"
+                />
               </div>
             </div>
           </div>
@@ -382,13 +685,18 @@ function ProductsPage({
   setError,
 }) {
   const [search, setSearch] = useState("");
-  const [showModal, setShowModal] = useState(false);
-  const [editingProduct, setEditingProduct] = useState(null);
-  const [form, setForm] = useState(emptyProduct);
+  const [showModal, setShowModal] =
+    useState(false);
+  const [editingProduct, setEditingProduct] =
+    useState(null);
+  const [form, setForm] =
+    useState(emptyProduct);
   const [saving, setSaving] = useState(false);
 
   const filteredProducts = useMemo(() => {
-    const query = search.toLowerCase().trim();
+    const query = search
+      .toLowerCase()
+      .trim();
 
     if (!query) {
       return products;
@@ -418,11 +726,16 @@ function ProductsPage({
       sku: product.sku || "",
       name: product.name || "",
       price: product.price || "",
-      cost_price: product.cost_price || "",
-      reorder_level: product.reorder_level ?? 10,
-      active: product.active ?? true,
-      category: product.category ?? 1,
-      supplier: product.supplier ?? 1,
+      cost_price:
+        product.cost_price || "",
+      reorder_level:
+        product.reorder_level ?? 10,
+      active:
+        product.active ?? true,
+      category:
+        product.category ?? 1,
+      supplier:
+        product.supplier ?? 1,
     });
 
     setShowModal(true);
@@ -437,11 +750,19 @@ function ProductsPage({
   };
 
   const handleChange = (event) => {
-    const { name, value, type, checked } = event.target;
+    const {
+      name,
+      value,
+      type,
+      checked,
+    } = event.target;
 
     setForm((current) => ({
       ...current,
-      [name]: type === "checkbox" ? checked : value,
+      [name]:
+        type === "checkbox"
+          ? checked
+          : value,
     }));
   };
 
@@ -480,7 +801,10 @@ function ProductsPage({
 
         showMessage("Product updated successfully.");
       } else {
-        response = await api.post("/products/", payload);
+        response = await api.post(
+          "/products/",
+          payload
+        );
 
         setProducts((current) => [
           response.data,
@@ -495,7 +819,6 @@ function ProductsPage({
       console.error(err);
 
       const data = err.response?.data;
-
       const detail =
         data?.detail ||
         data?.sku?.[0] ||
@@ -509,20 +832,28 @@ function ProductsPage({
   };
 
   const deleteProduct = async (product) => {
-    const confirmed = window.confirm(
-      `Delete "${product.name}"?`
-    );
+    const confirmed =
+      window.confirm(
+        `Delete "${product.name}"?`
+      );
 
     if (!confirmed) return;
 
     try {
-      await api.delete(`/products/${product.id}/`);
-
-      setProducts((current) =>
-        current.filter((item) => item.id !== product.id)
+      await api.delete(
+        `/products/${product.id}/`
       );
 
-      showMessage("Product deleted successfully.");
+      setProducts((current) =>
+        current.filter(
+          (item) =>
+            item.id !== product.id
+        )
+      );
+
+      showMessage(
+        "Product deleted successfully."
+      );
     } catch (err) {
       console.error(err);
 
@@ -540,7 +871,10 @@ function ProductsPage({
         title="Product Management"
         description="Manage your product catalog and pricing."
         action={
-          <button onClick={openAdd} style={styles.primaryButton}>
+          <button
+            onClick={openAdd}
+            style={styles.primaryButton}
+          >
             + Add Product
           </button>
         }
@@ -548,11 +882,15 @@ function ProductsPage({
 
       <div style={styles.toolbar}>
         <div style={styles.searchWrapper}>
-          <span style={styles.searchIcon}>⌕</span>
+          <span style={styles.searchIcon}>
+            ⌕
+          </span>
 
           <input
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) =>
+              setSearch(event.target.value)
+            }
             placeholder="Search by product name or SKU..."
             style={styles.searchInput}
           />
@@ -569,79 +907,124 @@ function ProductsPage({
             <thead>
               <tr>
                 <th style={styles.th}>ID</th>
-                <th style={styles.th}>Product</th>
+                <th style={styles.th}>
+                  Product
+                </th>
                 <th style={styles.th}>SKU</th>
                 <th style={styles.th}>Price</th>
-                <th style={styles.th}>Reorder</th>
-                <th style={styles.th}>Status</th>
-                <th style={styles.th}>Actions</th>
+                <th style={styles.th}>
+                  Reorder
+                </th>
+                <th style={styles.th}>
+                  Status
+                </th>
+                <th style={styles.th}>
+                  Actions
+                </th>
               </tr>
             </thead>
 
             <tbody>
-              {filteredProducts.map((product) => (
-                <tr key={product.id}>
-                  <td style={styles.td}>#{product.id}</td>
+              {filteredProducts.map(
+                (product) => (
+                  <tr key={product.id}>
+                    <td style={styles.td}>
+                      #{product.id}
+                    </td>
 
-                  <td style={styles.td}>
-                    <div style={styles.productName}>
-                      {product.name}
-                    </div>
-                  </td>
-
-                  <td style={styles.td}>
-                    <span style={styles.skuBadge}>
-                      {product.sku}
-                    </span>
-                  </td>
-
-                  <td style={styles.td}>
-                    ₹
-                    {Number(product.price || 0).toLocaleString(
-                      "en-IN"
-                    )}
-                  </td>
-
-                  <td style={styles.td}>
-                    {product.reorder_level ?? 0}
-                  </td>
-
-                  <td style={styles.td}>
-                    <span
-                      style={{
-                        ...styles.statusBadge,
-                        ...(product.active
-                          ? styles.statusHealthy
-                          : styles.statusInactive),
-                      }}
-                    >
-                      {product.active ? "Active" : "Inactive"}
-                    </span>
-                  </td>
-
-                  <td style={styles.td}>
-                    <div style={styles.actionGroup}>
-                      <button
-                        onClick={() => openEdit(product)}
-                        style={styles.editButton}
+                    <td style={styles.td}>
+                      <div
+                        style={
+                          styles.productName
+                        }
                       >
-                        Edit
-                      </button>
+                        {product.name}
+                      </div>
+                    </td>
 
-                      <button
-                        onClick={() => deleteProduct(product)}
-                        style={styles.deleteButton}
+                    <td style={styles.td}>
+                      <span
+                        style={
+                          styles.skuBadge
+                        }
                       >
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+                        {product.sku}
+                      </span>
+                    </td>
 
-              {filteredProducts.length === 0 && (
+                    <td style={styles.td}>
+                      ₹
+                      {Number(
+                        product.price || 0
+                      ).toLocaleString(
+                        "en-IN"
+                      )}
+                    </td>
+
+                    <td style={styles.td}>
+                      {product.reorder_level ??
+                        0}
+                    </td>
+
+                    <td style={styles.td}>
+                      <span
+                        style={{
+                          ...styles.statusBadge,
+                          ...(product.active
+                            ? styles.statusHealthy
+                            : styles.statusInactive),
+                        }}
+                      >
+                        {product.active
+                          ? "Active"
+                          : "Inactive"}
+                      </span>
+                    </td>
+
+                    <td style={styles.td}>
+                      <div
+                        style={
+                          styles.actionGroup
+                        }
+                      >
+                        <button
+                          onClick={() =>
+                            openEdit(product)
+                          }
+                          style={
+                            styles.editButton
+                          }
+                        >
+                          Edit
+                        </button>
+
+                        <button
+                          onClick={() =>
+                            deleteProduct(
+                              product
+                            )
+                          }
+                          style={
+                            styles.deleteButton
+                          }
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              )}
+
+              {filteredProducts.length ===
+                0 && (
                 <tr>
-                  <td colSpan="7" style={styles.emptyCell}>
+                  <td
+                    colSpan="7"
+                    style={
+                      styles.emptyCell
+                    }
+                  >
                     No products found.
                   </td>
                 </tr>
@@ -683,7 +1066,9 @@ function ProductModal({
         <div style={styles.modalHeader}>
           <div>
             <h2 style={styles.modalTitle}>
-              {editingProduct ? "Edit Product" : "Add Product"}
+              {editingProduct
+                ? "Edit Product"
+                : "Add Product"}
             </h2>
 
             <p style={styles.modalSub}>
@@ -693,7 +1078,10 @@ function ProductModal({
             </p>
           </div>
 
-          <button onClick={onClose} style={styles.closeButton}>
+          <button
+            onClick={onClose}
+            style={styles.closeButton}
+          >
             ×
           </button>
         </div>
@@ -743,7 +1131,9 @@ function ProductModal({
               name="reorder_level"
               type="number"
               min="0"
-              value={form.reorder_level}
+              value={
+                form.reorder_level
+              }
               onChange={onChange}
             />
 
@@ -766,7 +1156,11 @@ function ProductModal({
             />
           </div>
 
-          <label style={styles.checkboxLabel}>
+          <label
+            style={
+              styles.checkboxLabel
+            }
+          >
             <input
               type="checkbox"
               name="active"
@@ -776,11 +1170,17 @@ function ProductModal({
             Product is active
           </label>
 
-          <div style={styles.modalActions}>
+          <div
+            style={
+              styles.modalActions
+            }
+          >
             <button
               type="button"
               onClick={onClose}
-              style={styles.secondaryButton}
+              style={
+                styles.secondaryButton
+              }
             >
               Cancel
             </button>
@@ -788,7 +1188,9 @@ function ProductModal({
             <button
               type="submit"
               disabled={saving}
-              style={styles.primaryButton}
+              style={
+                styles.primaryButton
+              }
             >
               {saving
                 ? "Saving..."
@@ -812,9 +1214,11 @@ function InventoryPage({
   loading,
   onRefresh,
 }) {
-  const [search, setSearch] = useState("");
+  const [search, setSearch] =
+    useState("");
 
-  const [movementType, setMovementType] = useState(null);
+  const [movementType, setMovementType] =
+    useState(null);
 
   const [movementForm, setMovementForm] =
     useState(emptyMovement);
@@ -828,54 +1232,64 @@ function InventoryPage({
   const [movementSuccess, setMovementSuccess] =
     useState("");
 
-  const filteredInventory = useMemo(() => {
-    const query = search.toLowerCase().trim();
+  const filteredInventory =
+    useMemo(() => {
+      const query = search
+        .toLowerCase()
+        .trim();
 
-    if (!query) {
-      return inventory;
-    }
+      if (!query) {
+        return inventory;
+      }
 
-    return inventory.filter((item) => {
-      const productName = String(
-        item.product_name || ""
-      ).toLowerCase();
+      return inventory.filter((item) => {
+        const productName =
+          String(
+            item.product_name || ""
+          ).toLowerCase();
 
-      const sku = String(
-        item.product_sku || ""
-      ).toLowerCase();
+        const sku = String(
+          item.product_sku || ""
+        ).toLowerCase();
 
-      const warehouse = String(
-        item.warehouse_name || ""
-      ).toLowerCase();
+        const warehouse =
+          String(
+            item.warehouse_name || ""
+          ).toLowerCase();
 
-      return (
-        productName.includes(query) ||
-        sku.includes(query) ||
-        warehouse.includes(query)
-      );
-    });
-  }, [inventory, search]);
+        return (
+          productName.includes(query) ||
+          sku.includes(query) ||
+          warehouse.includes(query)
+        );
+      });
+    }, [inventory, search]);
 
-  const lowStockItems = filteredInventory.filter(
-    (item) =>
-      Number(item.available_stock ?? 0) <=
-      Number(item.reorder_level ?? 0)
-  );
+  const lowStockItems =
+    filteredInventory.filter(
+      (item) =>
+        Number(
+          item.available_stock ?? 0
+        ) <=
+        Number(
+          item.reorder_level ?? 0
+        )
+    );
 
   const healthyItems =
-    filteredInventory.length - lowStockItems.length;
+    filteredInventory.length -
+    lowStockItems.length;
 
-  const totalAvailable = filteredInventory.reduce(
-    (sum, item) =>
-      sum + Number(item.available_stock ?? 0),
-    0
-  );
+  const totalAvailable =
+    filteredInventory.reduce(
+      (sum, item) =>
+        sum +
+        Number(
+          item.available_stock ?? 0
+        ),
+      0
+    );
 
-  /*
-    Build unique dropdown options from inventory records.
-    This allows the Stock In/Out modal to work with the
-    existing Inventory API without adding extra API calls.
-  */
   const productOptions = useMemo(() => {
     const map = new Map();
 
@@ -895,27 +1309,32 @@ function InventoryPage({
       }
     });
 
-    return Array.from(map.values());
+    return Array.from(
+      map.values()
+    );
   }, [inventory]);
 
-  const warehouseOptions = useMemo(() => {
-    const map = new Map();
+  const warehouseOptions =
+    useMemo(() => {
+      const map = new Map();
 
-    inventory.forEach((item) => {
-      if (!item.warehouse) return;
+      inventory.forEach((item) => {
+        if (!item.warehouse) return;
 
-      if (!map.has(item.warehouse)) {
-        map.set(item.warehouse, {
-          id: item.warehouse,
-          name:
-            item.warehouse_name ||
-            `Warehouse #${item.warehouse}`,
-        });
-      }
-    });
+        if (!map.has(item.warehouse)) {
+          map.set(item.warehouse, {
+            id: item.warehouse,
+            name:
+              item.warehouse_name ||
+              `Warehouse #${item.warehouse}`,
+          });
+        }
+      });
 
-    return Array.from(map.values());
-  }, [inventory]);
+      return Array.from(
+        map.values()
+      );
+    }, [inventory]);
 
   const openMovementModal = (type) => {
     setMovementType(type);
@@ -924,11 +1343,15 @@ function InventoryPage({
       ...emptyMovement,
       product:
         productOptions.length === 1
-          ? String(productOptions[0].id)
+          ? String(
+              productOptions[0].id
+            )
           : "",
       warehouse:
         warehouseOptions.length === 1
-          ? String(warehouseOptions[0].id)
+          ? String(
+              warehouseOptions[0].id
+            )
           : "",
     });
 
@@ -940,13 +1363,20 @@ function InventoryPage({
     if (movementLoading) return;
 
     setMovementType(null);
-    setMovementForm({ ...emptyMovement });
+    setMovementForm({
+      ...emptyMovement,
+    });
     setMovementError("");
     setMovementSuccess("");
   };
 
-  const handleMovementChange = (event) => {
-    const { name, value } = event.target;
+  const handleMovementChange = (
+    event
+  ) => {
+    const {
+      name,
+      value,
+    } = event.target;
 
     setMovementForm((current) => ({
       ...current,
@@ -954,67 +1384,85 @@ function InventoryPage({
     }));
   };
 
-  const handleMovementSubmit = async (event) => {
-    event.preventDefault();
+  const handleMovementSubmit =
+    async (event) => {
+      event.preventDefault();
 
-    setMovementError("");
-    setMovementSuccess("");
+      setMovementError("");
+      setMovementSuccess("");
 
-    const productId = Number(movementForm.product);
-    const warehouseId = Number(movementForm.warehouse);
-    const quantity = Number(movementForm.quantity);
-
-    if (!productId || !warehouseId || quantity <= 0) {
-      setMovementError(
-        "Please select a product, warehouse and enter a valid quantity."
-      );
-      return;
-    }
-
-    try {
-      setMovementLoading(true);
-
-      await api.post("/stock-movements/", {
-        product: productId,
-        warehouse: warehouseId,
-        movement_type: movementType,
-        quantity,
-        reference:
-          movementForm.reference.trim() ||
-          `${
-            movementType === "IN"
-              ? "STOCK-IN"
-              : "STOCK-OUT"
-          }-${Date.now()}`,
-      });
-
-      setMovementSuccess(
-        movementType === "IN"
-          ? "Stock added successfully."
-          : "Stock removed successfully."
+      const productId = Number(
+        movementForm.product
       );
 
-      await onRefresh();
+      const warehouseId = Number(
+        movementForm.warehouse
+      );
 
-      setTimeout(() => {
-        closeMovementModal();
-      }, 800);
-    } catch (error) {
-      console.error(error);
+      const quantity = Number(
+        movementForm.quantity
+      );
 
-      const data = error.response?.data;
+      if (
+        !productId ||
+        !warehouseId ||
+        quantity <= 0
+      ) {
+        setMovementError(
+          "Please select a product, warehouse and enter a valid quantity."
+        );
+        return;
+      }
 
-      const message =
-        data?.quantity?.[0] ||
-        data?.detail ||
-        data?.non_field_errors?.[0] ||
-        "Unable to update stock. Please try again.";
+      try {
+        setMovementLoading(true);
 
-      setMovementError(message);
-    } finally {
-      setMovementLoading(false);
-    }
-  };
+        await api.post(
+          "/stock-movements/",
+          {
+            product: productId,
+            warehouse: warehouseId,
+            movement_type:
+              movementType,
+            quantity,
+            reference:
+              movementForm.reference.trim() ||
+              `${
+                movementType === "IN"
+                  ? "STOCK-IN"
+                  : "STOCK-OUT"
+              }-${Date.now()}`,
+          }
+        );
+
+        setMovementSuccess(
+          movementType === "IN"
+            ? "Stock added successfully."
+            : "Stock removed successfully."
+        );
+
+        await onRefresh();
+
+        setTimeout(() => {
+          closeMovementModal();
+        }, 800);
+      } catch (error) {
+        console.error(error);
+
+        const data =
+          error.response?.data;
+
+        const message =
+          data?.quantity?.[0] ||
+          data?.detail ||
+          data?.non_field_errors?.[0] ||
+          "Unable to update stock. Please try again.";
+
+        setMovementError(message);
+      } finally {
+        setMovementLoading(false);
+      }
+    };
 
   return (
     <div>
@@ -1023,24 +1471,38 @@ function InventoryPage({
         title="Inventory Management"
         description="Monitor and control stock levels across warehouses."
         action={
-          <div style={styles.headerButtons}>
+          <div
+            style={
+              styles.headerButtons
+            }
+          >
             <button
-              onClick={() => openMovementModal("IN")}
-              style={styles.primaryButton}
+              onClick={() =>
+                openMovementModal("IN")
+              }
+              style={
+                styles.primaryButton
+              }
             >
               + Stock In
             </button>
 
             <button
-              onClick={() => openMovementModal("OUT")}
-              style={styles.stockOutButton}
+              onClick={() =>
+                openMovementModal("OUT")
+              }
+              style={
+                styles.stockOutButton
+              }
             >
               − Stock Out
             </button>
 
             <button
               onClick={onRefresh}
-              style={styles.secondaryButton}
+              style={
+                styles.secondaryButton
+              }
             >
               ↻ Refresh
             </button>
@@ -1051,22 +1513,31 @@ function InventoryPage({
       <div style={styles.statsGrid}>
         <StatCard
           title="Inventory Records"
-          value={filteredInventory.length}
+          value={
+            filteredInventory.length
+          }
           subtitle="Live records"
           icon="◈"
         />
 
         <StatCard
           title="Low Stock"
-          value={lowStockItems.length}
+          value={
+            lowStockItems.length
+          }
           subtitle="Needs attention"
           icon="⚠"
-          danger={lowStockItems.length > 0}
+          danger={
+            lowStockItems.length > 0
+          }
         />
 
         <StatCard
           title="Healthy Stock"
-          value={Math.max(healthyItems, 0)}
+          value={Math.max(
+            healthyItems,
+            0
+          )}
           subtitle="Above reorder level"
           icon="✓"
         />
@@ -1081,17 +1552,28 @@ function InventoryPage({
 
       {lowStockItems.length > 0 && (
         <div style={styles.alertBox}>
-          <div style={styles.alertIcon}>⚠</div>
+          <div style={styles.alertIcon}>
+            ⚠
+          </div>
 
           <div>
-            <div style={styles.alertTitle}>
+            <div
+              style={styles.alertTitle}
+            >
               Low Stock Alert
             </div>
 
-            <div style={styles.alertText}>
-              {lowStockItems.length} product
-              {lowStockItems.length !== 1 ? "s" : ""} reached
-              or crossed the reorder level.
+            <div
+              style={styles.alertText}
+            >
+              {lowStockItems.length}{" "}
+              product
+              {lowStockItems.length !==
+              1
+                ? "s"
+                : ""}{" "}
+              reached or crossed the
+              reorder level.
             </div>
           </div>
         </div>
@@ -1099,12 +1581,18 @@ function InventoryPage({
 
       <div style={styles.toolbar}>
         <div style={styles.searchWrapper}>
-          <span style={styles.searchIcon}>⌕</span>
+          <span
+            style={styles.searchIcon}
+          >
+            ⌕
+          </span>
 
           <input
             value={search}
             onChange={(event) =>
-              setSearch(event.target.value)
+              setSearch(
+                event.target.value
+              )
             }
             placeholder="Search product, SKU or warehouse..."
             style={styles.searchInput}
@@ -1112,7 +1600,10 @@ function InventoryPage({
         </div>
 
         <div style={styles.liveBadge}>
-          <span style={styles.liveDot} />
+          <span
+            style={styles.liveDot}
+          />
+
           Live Inventory
         </div>
       </div>
@@ -1120,7 +1611,9 @@ function InventoryPage({
       <div style={styles.panel}>
         <div style={styles.panelHeader}>
           <div>
-            <h2 style={styles.panelTitle}>
+            <h2
+              style={styles.panelTitle}
+            >
               Stock Overview
             </h2>
 
@@ -1133,117 +1626,232 @@ function InventoryPage({
         {loading ? (
           <Loading />
         ) : (
-          <div style={styles.tableWrapper}>
-            <table style={styles.table}>
+          <div
+            style={
+              styles.tableWrapper
+            }
+          >
+            <table
+              style={styles.table}
+            >
               <thead>
                 <tr>
-                  <th style={styles.th}>Product</th>
-                  <th style={styles.th}>SKU</th>
-                  <th style={styles.th}>Warehouse</th>
-                  <th style={styles.th}>Stock</th>
-                  <th style={styles.th}>Reserved</th>
-                  <th style={styles.th}>Available</th>
-                  <th style={styles.th}>Reorder</th>
-                  <th style={styles.th}>Status</th>
+                  <th style={styles.th}>
+                    Product
+                  </th>
+
+                  <th style={styles.th}>
+                    SKU
+                  </th>
+
+                  <th style={styles.th}>
+                    Warehouse
+                  </th>
+
+                  <th style={styles.th}>
+                    Stock
+                  </th>
+
+                  <th style={styles.th}>
+                    Reserved
+                  </th>
+
+                  <th style={styles.th}>
+                    Available
+                  </th>
+
+                  <th style={styles.th}>
+                    Reorder
+                  </th>
+
+                  <th style={styles.th}>
+                    Status
+                  </th>
                 </tr>
               </thead>
 
               <tbody>
-                {filteredInventory.map((item) => {
-                  const available = Number(
-                    item.available_stock ?? 0
-                  );
+                {filteredInventory.map(
+                  (item) => {
+                    const available =
+                      Number(
+                        item.available_stock ??
+                          0
+                      );
 
-                  const reorder = Number(
-                    item.reorder_level ?? 0
-                  );
+                    const reorder =
+                      Number(
+                        item.reorder_level ??
+                          0
+                      );
 
-                  const isLow = available <= reorder;
+                    const isLow =
+                      available <=
+                      reorder;
 
-                  return (
-                    <tr key={item.id}>
-                      <td style={styles.td}>
-                        <div style={styles.productCell}>
-                          <div style={styles.productAvatar}>
-                            {getInitial(item.product_name)}
-                          </div>
-
-                          <div>
-                            <div style={styles.productName}>
-                              {item.product_name ||
-                                `Product #${item.product}`}
+                    return (
+                      <tr
+                        key={item.id}
+                      >
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          <div
+                            style={
+                              styles.productCell
+                            }
+                          >
+                            <div
+                              style={
+                                styles.productAvatar
+                              }
+                            >
+                              {getInitial(
+                                item.product_name
+                              )}
                             </div>
 
-                            <div style={styles.productId}>
-                              Inventory #{item.id}
+                            <div>
+                              <div
+                                style={
+                                  styles.productName
+                                }
+                              >
+                                {item.product_name ||
+                                  `Product #${item.product}`}
+                              </div>
+
+                              <div
+                                style={
+                                  styles.productId
+                                }
+                              >
+                                Inventory #
+                                {item.id}
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td style={styles.td}>
-                        <span style={styles.skuBadge}>
-                          {item.product_sku ||
-                            `SKU-${item.product}`}
-                        </span>
-                      </td>
-
-                      <td style={styles.td}>
-                        <div style={styles.warehouseText}>
-                          <span>▣</span>
-                          {item.warehouse_name ||
-                            `Warehouse #${item.warehouse}`}
-                        </div>
-                      </td>
-
-                      <td style={styles.td}>
-                        <strong>
-                          {Number(item.quantity ?? 0)}
-                        </strong>
-                      </td>
-
-                      <td style={styles.td}>
-                        {Number(item.reserved ?? 0)}
-                      </td>
-
-                      <td style={styles.td}>
-                        <strong
-                          style={{
-                            color: isLow
-                              ? "#dc2626"
-                              : "#16a34a",
-                          }}
+                        <td
+                          style={
+                            styles.td
+                          }
                         >
-                          {available}
-                        </strong>
-                      </td>
+                          <span
+                            style={
+                              styles.skuBadge
+                            }
+                          >
+                            {item.product_sku ||
+                              `SKU-${item.product}`}
+                          </span>
+                        </td>
 
-                      <td style={styles.td}>
-                        {reorder}
-                      </td>
-
-                      <td style={styles.td}>
-                        <span
-                          style={{
-                            ...styles.statusBadge,
-                            ...(isLow
-                              ? styles.statusLow
-                              : styles.statusHealthy),
-                          }}
+                        <td
+                          style={
+                            styles.td
+                          }
                         >
-                          {isLow
-                            ? "Low Stock"
-                            : "Healthy"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                          <div
+                            style={
+                              styles.warehouseText
+                            }
+                          >
+                            <span>
+                              ▣
+                            </span>
 
-                {filteredInventory.length === 0 && (
+                            {item.warehouse_name ||
+                              `Warehouse #${item.warehouse}`}
+                          </div>
+                        </td>
+
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          <strong>
+                            {Number(
+                              item.quantity ??
+                                0
+                            )}
+                          </strong>
+                        </td>
+
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          {Number(
+                            item.reserved ??
+                              0
+                          )}
+                        </td>
+
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          <strong
+                            style={{
+                              color:
+                                isLow
+                                  ? "#dc2626"
+                                  : "#16a34a",
+                            }}
+                          >
+                            {available}
+                          </strong>
+                        </td>
+
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          {reorder}
+                        </td>
+
+                        <td
+                          style={
+                            styles.td
+                          }
+                        >
+                          <span
+                            style={{
+                              ...styles.statusBadge,
+                              ...(isLow
+                                ? styles.statusLow
+                                : styles.statusHealthy),
+                            }}
+                          >
+                            {isLow
+                              ? "Low Stock"
+                              : "Healthy"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  }
+                )}
+
+                {filteredInventory.length ===
+                  0 && (
                   <tr>
-                    <td colSpan="8" style={styles.emptyCell}>
-                      No inventory records found.
+                    <td
+                      colSpan="8"
+                      style={
+                        styles.emptyCell
+                      }
+                    >
+                      No inventory records
+                      found.
                     </td>
                   </tr>
                 )}
@@ -1258,13 +1866,21 @@ function InventoryPage({
           type={movementType}
           form={movementForm}
           products={productOptions}
-          warehouses={warehouseOptions}
+          warehouses={
+            warehouseOptions
+          }
           loading={movementLoading}
           error={movementError}
           success={movementSuccess}
-          onChange={handleMovementChange}
-          onSubmit={handleMovementSubmit}
-          onClose={closeMovementModal}
+          onChange={
+            handleMovementChange
+          }
+          onSubmit={
+            handleMovementSubmit
+          }
+          onClose={
+            closeMovementModal
+          }
         />
       )}
     </div>
@@ -1291,11 +1907,21 @@ function StockMovementModal({
 
   return (
     <div style={styles.modalOverlay}>
-      <div style={styles.movementModal}>
-        <div style={styles.modalHeader}>
+      <div
+        style={
+          styles.movementModal
+        }
+      >
+        <div
+          style={styles.modalHeader}
+        >
           <div>
-            <h2 style={styles.modalTitle}>
-              {isStockIn ? "Stock In" : "Stock Out"}
+            <h2
+              style={styles.modalTitle}
+            >
+              {isStockIn
+                ? "Stock In"
+                : "Stock Out"}
             </h2>
 
             <p style={styles.modalSub}>
@@ -1308,28 +1934,46 @@ function StockMovementModal({
           <button
             onClick={onClose}
             disabled={loading}
-            style={styles.closeButton}
+            style={
+              styles.closeButton
+            }
           >
             ×
           </button>
         </div>
 
         <form onSubmit={onSubmit}>
-          <div style={styles.movementBody}>
+          <div
+            style={
+              styles.movementBody
+            }
+          >
             {error && (
-              <div style={styles.movementError}>
+              <div
+                style={
+                  styles.movementError
+                }
+              >
                 ⚠ {error}
               </div>
             )}
 
             {success && (
-              <div style={styles.movementSuccess}>
+              <div
+                style={
+                  styles.movementSuccess
+                }
+              >
                 ✓ {success}
               </div>
             )}
 
-            <div style={styles.formField}>
-              <label style={styles.formLabel}>
+            <div
+              style={styles.formField}
+            >
+              <label
+                style={styles.formLabel}
+              >
                 Product
               </label>
 
@@ -1338,52 +1982,77 @@ function StockMovementModal({
                 value={form.product}
                 onChange={onChange}
                 required
-                style={styles.formInput}
+                style={
+                  styles.formInput
+                }
               >
                 <option value="">
                   Select product
                 </option>
 
-                {products.map((product) => (
-                  <option
-                    key={product.id}
-                    value={product.id}
-                  >
-                    {product.name} — {product.sku}
-                  </option>
-                ))}
+                {products.map(
+                  (product) => (
+                    <option
+                      key={product.id}
+                      value={
+                        product.id
+                      }
+                    >
+                      {product.name} —{" "}
+                      {product.sku}
+                    </option>
+                  )
+                )}
               </select>
             </div>
 
-            <div style={styles.formField}>
-              <label style={styles.formLabel}>
+            <div
+              style={styles.formField}
+            >
+              <label
+                style={styles.formLabel}
+              >
                 Warehouse
               </label>
 
               <select
                 name="warehouse"
-                value={form.warehouse}
+                value={
+                  form.warehouse
+                }
                 onChange={onChange}
                 required
-                style={styles.formInput}
+                style={
+                  styles.formInput
+                }
               >
                 <option value="">
                   Select warehouse
                 </option>
 
-                {warehouses.map((warehouse) => (
-                  <option
-                    key={warehouse.id}
-                    value={warehouse.id}
-                  >
-                    {warehouse.name}
-                  </option>
-                ))}
+                {warehouses.map(
+                  (warehouse) => (
+                    <option
+                      key={
+                        warehouse.id
+                      }
+                      value={
+                        warehouse.id
+                      }
+                    >
+                      {warehouse.name}
+                    </option>
+                  )
+                )}
               </select>
             </div>
 
-            <div style={styles.formField}>
-              <label style={styles.formLabel}>
+            <div
+              style={styles.formField}
+            >
+              <label
+                style={styles.formLabel}
+              >
                 Quantity
               </label>
 
@@ -1392,36 +2061,54 @@ function StockMovementModal({
                 type="number"
                 min="1"
                 step="1"
-                value={form.quantity}
+                value={
+                  form.quantity
+                }
                 onChange={onChange}
                 placeholder="Enter quantity"
                 required
-                style={styles.formInput}
+                style={
+                  styles.formInput
+                }
               />
             </div>
 
-            <div style={styles.formField}>
-              <label style={styles.formLabel}>
+            <div
+              style={styles.formField}
+            >
+              <label
+                style={styles.formLabel}
+              >
                 Reference
               </label>
 
               <input
                 name="reference"
                 type="text"
-                value={form.reference}
+                value={
+                  form.reference
+                }
                 onChange={onChange}
                 placeholder="PO-1001 / SALE-1001"
-                style={styles.formInput}
+                style={
+                  styles.formInput
+                }
               />
             </div>
           </div>
 
-          <div style={styles.modalActions}>
+          <div
+            style={
+              styles.modalActions
+            }
+          >
             <button
               type="button"
               onClick={onClose}
               disabled={loading}
-              style={styles.secondaryButton}
+              style={
+                styles.secondaryButton
+              }
             >
               Cancel
             </button>
@@ -1459,19 +2146,31 @@ function PageHeader({
   action,
 }) {
   return (
-    <div style={styles.pageHeader}>
+    <div
+      style={styles.pageHeader}
+    >
       <div>
-        <div style={styles.eyebrow}>{eyebrow}</div>
+        <div style={styles.eyebrow}>
+          {eyebrow}
+        </div>
 
-        <h1 style={styles.pageTitle}>{title}</h1>
+        <h1 style={styles.pageTitle}>
+          {title}
+        </h1>
 
-        <p style={styles.pageDescription}>
+        <p
+          style={
+            styles.pageDescription
+          }
+        >
           {description}
         </p>
       </div>
 
       {action && (
-        <div style={styles.headerAction}>
+        <div
+          style={styles.headerAction}
+        >
           {action}
         </div>
       )}
@@ -1491,25 +2190,39 @@ function StatCard({
       <div
         style={{
           ...styles.statIcon,
-          ...(danger ? styles.statIconDanger : {}),
+          ...(danger
+            ? styles.statIconDanger
+            : {}),
         }}
       >
         {icon}
       </div>
 
-      <div style={styles.statContent}>
-        <div style={styles.statTitle}>{title}</div>
+      <div
+        style={styles.statContent}
+      >
+        <div
+          style={styles.statTitle}
+        >
+          {title}
+        </div>
 
         <div
           style={{
             ...styles.statValue,
-            ...(danger ? { color: "#dc2626" } : {}),
+            ...(danger
+              ? { color: "#dc2626" }
+              : {}),
           }}
         >
           {value}
         </div>
 
-        <div style={styles.statSubtitle}>
+        <div
+          style={
+            styles.statSubtitle
+          }
+        >
           {subtitle}
         </div>
       </div>
@@ -1517,15 +2230,27 @@ function StatCard({
   );
 }
 
-function StatusRow({ label, status }) {
+function StatusRow({
+  label,
+  status,
+}) {
   return (
     <div style={styles.statusRow}>
-      <div style={styles.statusLabel}>
-        <span style={styles.greenDot} />
+      <div
+        style={styles.statusLabel}
+      >
+        <span
+          style={styles.greenDot}
+        />
+
         {label}
       </div>
 
-      <span style={styles.connectedBadge}>
+      <span
+        style={
+          styles.connectedBadge
+        }
+      >
         {status}
       </span>
     </div>
@@ -1544,7 +2269,9 @@ function FormField({
 }) {
   return (
     <div style={styles.formField}>
-      <label style={styles.formLabel}>
+      <label
+        style={styles.formLabel}
+      >
         {label}
       </label>
 
@@ -1565,13 +2292,19 @@ function FormField({
 function Loading() {
   return (
     <div style={styles.loading}>
-      <div style={styles.spinner} />
+      <div
+        style={styles.spinner}
+      />
+
       Loading data...
     </div>
   );
 }
 
-function ComingSoon({ title, onBack }) {
+function ComingSoon({
+  title,
+  onBack,
+}) {
   return (
     <div>
       <PageHeader
@@ -1581,22 +2314,41 @@ function ComingSoon({ title, onBack }) {
         action={
           <button
             onClick={onBack}
-            style={styles.secondaryButton}
+            style={
+              styles.secondaryButton
+            }
           >
             ← Dashboard
           </button>
         }
       />
 
-      <div style={styles.comingSoon}>
-        <div style={styles.comingSoonIcon}>◈</div>
+      <div
+        style={styles.comingSoon}
+      >
+        <div
+          style={
+            styles.comingSoonIcon
+          }
+        >
+          ◈
+        </div>
 
-        <h2 style={styles.comingSoonTitle}>
+        <h2
+          style={
+            styles.comingSoonTitle
+          }
+        >
           {title} module
         </h2>
 
-        <p style={styles.comingSoonText}>
-          This module is ready for the next development phase.
+        <p
+          style={
+            styles.comingSoonText
+          }
+        >
+          This module is ready for
+          the next development phase.
         </p>
       </div>
     </div>
@@ -1608,11 +2360,19 @@ function ComingSoon({ title, onBack }) {
 ========================================================= */
 
 function capitalize(value) {
-  return value.charAt(0).toUpperCase() + value.slice(1);
+  return (
+    value.charAt(0).toUpperCase() +
+    value.slice(1)
+  );
 }
 
 function getInitial(name = "") {
-  return name.trim().charAt(0).toUpperCase() || "P";
+  return (
+    name
+      .trim()
+      .charAt(0)
+      .toUpperCase() || "P"
+  );
 }
 
 /* =========================================================
@@ -1627,6 +2387,130 @@ const styles = {
     color: "#172033",
     fontFamily:
       "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+  },
+
+  loginPage: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background:
+      "linear-gradient(135deg, #eff6ff 0%, #f8fafc 55%, #eef2ff 100%)",
+    padding: "20px",
+  },
+
+  loginCard: {
+    width: "min(420px, 100%)",
+    background: "#fff",
+    border: "1px solid #e5eaf0",
+    borderRadius: "18px",
+    padding: "34px",
+    boxShadow:
+      "0 20px 60px rgba(15, 23, 42, 0.10)",
+  },
+
+  loginBrand: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "30px",
+  },
+
+  loginLogo: {
+    width: "46px",
+    height: "46px",
+    borderRadius: "12px",
+    background: "#2563eb",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontSize: "22px",
+    fontWeight: 800,
+  },
+
+  loginBrandName: {
+    fontSize: "20px",
+    fontWeight: 800,
+    color: "#111827",
+  },
+
+  loginBrandSub: {
+    fontSize: "11px",
+    color: "#94a3b8",
+    marginTop: "2px",
+  },
+
+  loginHeading: {
+    marginBottom: "22px",
+  },
+
+  loginTitle: {
+    margin: 0,
+    fontSize: "25px",
+    fontWeight: 800,
+    color: "#111827",
+  },
+
+  loginDescription: {
+    margin: "7px 0 0",
+    color: "#64748b",
+    fontSize: "13px",
+  },
+
+  loginError: {
+    marginBottom: "16px",
+    padding: "11px 13px",
+    borderRadius: "8px",
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#b91c1c",
+    fontSize: "12px",
+    fontWeight: 600,
+  },
+
+  loginField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    marginBottom: "15px",
+  },
+
+  loginLabel: {
+    fontSize: "12px",
+    color: "#475569",
+    fontWeight: 700,
+  },
+
+  loginInput: {
+    width: "100%",
+    boxSizing: "border-box",
+    border: "1px solid #dbe2ea",
+    borderRadius: "9px",
+    padding: "12px",
+    outline: "none",
+    fontSize: "13px",
+    background: "#fff",
+  },
+
+  loginButton: {
+    width: "100%",
+    border: 0,
+    borderRadius: "9px",
+    background: "#2563eb",
+    color: "#fff",
+    padding: "12px 16px",
+    fontWeight: 700,
+    fontSize: "13px",
+    cursor: "pointer",
+    marginTop: "5px",
+  },
+
+  loginFooter: {
+    textAlign: "center",
+    marginTop: "22px",
+    fontSize: "10px",
+    color: "#94a3b8",
   },
 
   sidebar: {
@@ -1721,7 +2605,7 @@ const styles = {
   },
 
   sidebarFooter: {
-    padding: "16px 20px",
+    padding: "16px 15px 16px 20px",
     borderTop: "1px solid #273244",
     display: "flex",
     alignItems: "center",
@@ -1744,6 +2628,17 @@ const styles = {
     fontSize: "10px",
     color: "#64748b",
     marginTop: "2px",
+  },
+
+  logoutButton: {
+    border: 0,
+    background: "#1f2937",
+    color: "#cbd5e1",
+    width: "30px",
+    height: "30px",
+    borderRadius: "7px",
+    cursor: "pointer",
+    fontSize: "16px",
   },
 
   main: {
@@ -1804,7 +2699,8 @@ const styles = {
     fontWeight: 700,
     fontSize: "13px",
     cursor: "pointer",
-    boxShadow: "0 2px 6px rgba(37, 99, 235, 0.2)",
+    boxShadow:
+      "0 2px 6px rgba(37, 99, 235, 0.2)",
   },
 
   stockOutButton: {
@@ -1867,7 +2763,8 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: "15px",
-    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.03)",
+    boxShadow:
+      "0 2px 8px rgba(15, 23, 42, 0.03)",
   },
 
   statIcon: {
@@ -1923,13 +2820,15 @@ const styles = {
     background: "#fff",
     border: "1px solid #e5eaf0",
     borderRadius: "13px",
-    boxShadow: "0 2px 8px rgba(15, 23, 42, 0.03)",
+    boxShadow:
+      "0 2px 8px rgba(15, 23, 42, 0.03)",
     overflow: "hidden",
   },
 
   panelHeader: {
     padding: "18px 20px",
-    borderBottom: "1px solid #eef1f5",
+    borderBottom:
+      "1px solid #eef1f5",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
@@ -1984,7 +2883,8 @@ const styles = {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
-    borderBottom: "1px solid #f1f5f9",
+    borderBottom:
+      "1px solid #f1f5f9",
   },
 
   statusLabel: {
@@ -2028,7 +2928,8 @@ const styles = {
     position: "absolute",
     left: "12px",
     top: "50%",
-    transform: "translateY(-50%)",
+    transform:
+      "translateY(-50%)",
     color: "#94a3b8",
     fontSize: "18px",
   },
@@ -2038,7 +2939,8 @@ const styles = {
     boxSizing: "border-box",
     border: "1px solid #dbe2ea",
     borderRadius: "9px",
-    padding: "11px 13px 11px 37px",
+    padding:
+      "11px 13px 11px 37px",
     outline: "none",
     fontSize: "13px",
     background: "#fff",
@@ -2056,7 +2958,8 @@ const styles = {
     gap: "7px",
     background: "#f0fdf4",
     color: "#15803d",
-    border: "1px solid #dcfce7",
+    border:
+      "1px solid #dcfce7",
     borderRadius: "8px",
     padding: "8px 11px",
     fontSize: "11px",
@@ -2090,13 +2993,15 @@ const styles = {
     textTransform: "uppercase",
     letterSpacing: "0.7px",
     fontWeight: 750,
-    borderBottom: "1px solid #e5eaf0",
+    borderBottom:
+      "1px solid #e5eaf0",
     whiteSpace: "nowrap",
   },
 
   td: {
     padding: "13px 16px",
-    borderBottom: "1px solid #eef1f5",
+    borderBottom:
+      "1px solid #eef1f5",
     fontSize: "12px",
     color: "#334155",
     whiteSpace: "nowrap",
@@ -2154,7 +3059,8 @@ const styles = {
   },
 
   editButton: {
-    border: "1px solid #bfdbfe",
+    border:
+      "1px solid #bfdbfe",
     background: "#eff6ff",
     color: "#2563eb",
     padding: "6px 9px",
@@ -2165,7 +3071,8 @@ const styles = {
   },
 
   deleteButton: {
-    border: "1px solid #fecaca",
+    border:
+      "1px solid #fecaca",
     background: "#fef2f2",
     color: "#dc2626",
     padding: "6px 9px",
@@ -2209,7 +3116,8 @@ const styles = {
     marginBottom: "17px",
     borderRadius: "10px",
     background: "#fff7ed",
-    border: "1px solid #fed7aa",
+    border:
+      "1px solid #fed7aa",
   },
 
   alertIcon: {
@@ -2264,7 +3172,8 @@ const styles = {
   modalOverlay: {
     position: "fixed",
     inset: 0,
-    background: "rgba(15, 23, 42, 0.55)",
+    background:
+      "rgba(15, 23, 42, 0.55)",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -2278,7 +3187,8 @@ const styles = {
     overflowY: "auto",
     background: "#fff",
     borderRadius: "15px",
-    boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
+    boxShadow:
+      "0 20px 50px rgba(15, 23, 42, 0.25)",
   },
 
   movementModal: {
@@ -2287,12 +3197,14 @@ const styles = {
     overflowY: "auto",
     background: "#fff",
     borderRadius: "15px",
-    boxShadow: "0 20px 50px rgba(15, 23, 42, 0.25)",
+    boxShadow:
+      "0 20px 50px rgba(15, 23, 42, 0.25)",
   },
 
   modalHeader: {
     padding: "20px",
-    borderBottom: "1px solid #eef1f5",
+    borderBottom:
+      "1px solid #eef1f5",
     display: "flex",
     justifyContent: "space-between",
     alignItems: "flex-start",
@@ -2372,14 +3284,16 @@ const styles = {
     justifyContent: "flex-end",
     gap: "10px",
     padding: "15px 20px 20px",
-    borderTop: "1px solid #eef1f5",
+    borderTop:
+      "1px solid #eef1f5",
   },
 
   movementError: {
     padding: "11px 13px",
     borderRadius: "8px",
     background: "#fef2f2",
-    border: "1px solid #fecaca",
+    border:
+      "1px solid #fecaca",
     color: "#b91c1c",
     fontSize: "12px",
     fontWeight: 600,
@@ -2389,7 +3303,8 @@ const styles = {
     padding: "11px 13px",
     borderRadius: "8px",
     background: "#ecfdf3",
-    border: "1px solid #bbf7d0",
+    border:
+      "1px solid #bbf7d0",
     color: "#166534",
     fontSize: "12px",
     fontWeight: 600,
