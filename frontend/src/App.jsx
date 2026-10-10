@@ -92,32 +92,41 @@ function App() {
       setLoading(true);
       setError("");
 
-      const [
-        productsResponse,
-        customersResponse,
-        ordersResponse,
-      ] = await Promise.all([
-        api.get("/products/"),
-        api.get("/customers/"),
-        api.get("/orders/"),
-      ]);
+      
+const [
+  productsResponse,
+  customersResponse,
+  ordersResponse,
+] = await Promise.all([
+  api.get("/products/?page_size=100"),
+  api.get("/customers/"),
+  api.get("/orders/"),
+]);
 
-      const productData =
-        productsResponse.data.results ||
-        productsResponse.data ||
-        [];
 
-      const customerData =
-        customersResponse.data.results ||
-        customersResponse.data ||
-        [];
+let productData = [];
+let nextPage = null;
 
-      const orderData =
-        ordersResponse.data.results ||
-        ordersResponse.data ||
-        [];
+if (productsResponse.data.results) {
+  productData = [...productsResponse.data.results];
+  nextPage = productsResponse.data.next;
 
-      setProducts(productData);
+  while (nextPage) {
+    const nextResponse = await api.get(nextPage);
+
+    productData.push(
+      ...(nextResponse.data.results || [])
+    );
+
+    nextPage = nextResponse.data.next;
+  }
+} else {
+  productData = productsResponse.data;
+}
+
+setProducts(productData);
+
+      
 
       setCustomersCount(
         customersResponse.data.count ?? customerData.length
@@ -2359,20 +2368,20 @@ function ComingSoon({
    HELPERS
 ========================================================= */
 
-function capitalize(value) {
-  return (
-    value.charAt(0).toUpperCase() +
-    value.slice(1)
-  );
+function capitalize(value = "") {
+  const text = String(value ?? "").trim();
+
+  if (!text) {
+    return "";
+  }
+
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function getInitial(name = "") {
-  return (
-    name
-      .trim()
-      .charAt(0)
-      .toUpperCase() || "P"
-  );
+  const text = String(name ?? "").trim();
+
+  return text ? text.charAt(0).toUpperCase() : "P";
 }
 
 /* =========================================================
